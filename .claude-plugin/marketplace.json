@@ -1,0 +1,5 @@
+{
+  "name": "claudecodex-limitspanel",
+  "owner": { "name": "snezhnyyy" },
+  "plugins": [{ "name": "limits", "source": "./" }]
+}
