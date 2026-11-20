@@ -1,1 +1,1 @@
-{ "name": "limits", "version": "0.1.0", "description": "Claude and Codex usage limits and this session's tokens in a pane", "types": "./types/index.d.ts" }
+{ "name": "limits", "version": "0.2.0", "description": "Claude and Codex usage limits and this session's tokens in a pane", "types": "./types/index.d.ts" }

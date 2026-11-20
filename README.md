@@ -4,7 +4,12 @@ A Claude Code mod: a **Лимиты** (Limits) pane beside the chat that shows, 
 
 - **Claude** — 5-hour and weekly usage limits (percent, bar, time to reset)
 - **Claude, this session** — tokens spent (input / output / cache), turns, estimated cost at API prices, context fill
-- **Codex** — 5-hour and weekly limits, plan, model, and tokens/tasks Codex spent during this session (read from your local `~/.codex/sessions` logs; refreshes every 30 s)
+- **Codex** — 5-hour and weekly limits, plan, model, and tokens/tasks Codex spent during this session (read from your local `~/.codex/sessions` logs; refreshes every minute)
+- **Codex вместо Claude** — what share of the last 7 days' tokens Codex did instead of Claude, plus this session's share and a rough saving at Claude's price
+- **7 дней** — tokens per day, Claude and Codex stacked (Claude days are counted from the moment this version is installed)
+- **Последний час** — Claude tokens per 5 minutes
+
+The pane adapts to its width: bars shrink, percentages never get cut; on a very narrow pane reset times and the Codex model name are hidden.
 
 Works great together with the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc). The mod only reads local files and Claude Code's own usage figures; it sends nothing anywhere.
 
