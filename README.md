@@ -109,3 +109,7 @@ claude plugin install limits --marketplace snezhnyyy/ClaudeCodex-LimitsPanel
 - Данные Claude берутся из самого Claude Code и никуда не уходят.
 - Токены Codex считаются по локальным логам Codex (`$CODEX_HOME/sessions`, по умолчанию `~/.codex/sessions`).
 - Чтобы лимиты Codex были актуальными, мод читает твой токен входа Codex из `~/.codex/auth.json` и отправляет его на `chatgpt.com/backend-api/wham/usage`. Это тот же адрес OpenAI, к которому обращается само приложение Codex, чтобы показать расход. Запрос идёт не чаще раза в минуту. Токен уходит только в OpenAI, нигде не сохраняется и больше никуда не отправляется. Если запрос не удался, мод берёт лимиты из локальных логов.
+
+---
+
+MIT License: see [LICENSE](LICENSE). / Лицензия MIT: см. [LICENSE](LICENSE).

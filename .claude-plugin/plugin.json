@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "Claude and Codex usage limits, pace and this session's tokens in a side pane (Russian or English)",
   "author": { "name": "snezhnyyy" },
+  "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
     "language": {
