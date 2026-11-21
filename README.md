@@ -10,6 +10,12 @@ A Claude Code mod: a side pane with your Claude and Codex usage limits, your pac
 
 ## English
 
+### Who it's for
+
+For people who use **Claude Code and Codex together**, most often through OpenAI's [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc): Claude plans and reviews, and Codex does the heavy coding. With two subscriptions you have two sets of limits, and it's easy to run out of one while the other sits unused. The pane shows both side by side and how fast you're spending each. It also tells you when to hand the next task to Codex, so Claude's limit lasts longer.
+
+It's useful with Claude alone too: limits, pace and session cost stay in view.
+
 ### What it shows
 
 - **Claude**: 5-hour and weekly limits as thin bars with the percent used and the time to reset. Below them: context fill, cache hit rate, tokens per minute, turns, and the session's cost at API prices (click the cost to switch to shawarmas).
@@ -61,6 +67,12 @@ Claude limits appear on a Claude subscription; they come from the API's rate-lim
 ---
 
 ## Русский
+
+### Для кого
+
+Для тех, кто работает с **Claude Code и Codex в связке**, чаще всего через [плагин Codex для Claude Code](https://github.com/openai/codex-plugin-cc) от OpenAI: Claude планирует и проверяет, а Codex пишет основной код. Две подписки означают два набора лимитов, и легко упереться в один, пока второй простаивает. Панель показывает оба рядом и то, как быстро ты тратишь каждый. А ещё подсказывает, когда лучше отдать следующую задачу Codex, чтобы лимит Claude продержался дольше.
+
+Пригодится и тем, у кого только Claude: лимиты, темп и стоимость сессии всегда перед глазами.
 
 ### Что показывает
 
