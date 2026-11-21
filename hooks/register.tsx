@@ -4,11 +4,12 @@ import type { EngineInterface, Register, SessionUsage, Timer } from 'claude-code
 import type { ClaudeMeasurement, ClaudeTokens } from '../types'
 import { claudeWindow, codexWindow, HOUR, liveWindow, observeClaudeLimits, readSnapshots, sameWindow } from './claude-limits'
 import { dayKey, readCodex, readCodexCache, refreshCodex } from './codex'
+import { setLanguage, t } from './i18n'
 import { drawPane } from './pane'
 import type { PaneElements, Preference } from './pane'
 
 const PANE = 'limits'
-const OPEN = { id: PANE, title: 'Лимиты', columns: 46 } as const
+const open = () => ({ id: PANE, title: t.title, columns: 46 })
 const POLL_MS = 60_000
 const ZERO: ClaudeTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 }
 const claudeTokens = atom({ plugin: 'limits', key: 'claudeTokens' }, ZERO, { shape: 'tokens-1' })
@@ -121,18 +122,19 @@ function startPolling($: EngineInterface) {
   tick()
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  setLanguage(options.language)
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'limits', description: 'Показать панель лимитов Claude и Codex' })
+    await $.command.register({ name: 'limits', description: t.commandDescription })
     const started = await next(e)
-    if ((await $.session.surfaces()).length > 0) void $.ui.open(OPEN)
+    if ((await $.session.surfaces()).length > 0) void $.ui.open(open())
     startPolling($)
     return started
   })
 
   on('session.attach', async ($, e, next) => {
     const attached = await next(e)
-    void $.ui.open(OPEN)
+    void $.ui.open(open())
     startPolling($)
     return attached
   })
@@ -144,14 +146,16 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'limits' }, async $ => {
-    await $.ui.open(OPEN)
+    await $.ui.open(open())
     startPolling($)
-    return { text: 'Панель лимитов открыта.' }
+    return { text: t.commandOpened }
   })
 
-  on('turn.complete', async ($, e, next) => {
-    const done = await next(e)
-    const usage = done.usage
+  // Each response's tokens count as it lands, so the numbers move with the cost
+  // during a long turn instead of all at once when it ends.
+  on('turn.step', async function* ($, e, next) {
+    const response = yield* next(e)
+    const usage = response.usage
     if (usage) {
       const at = await $.clock.now()
       const input = usage.input_tokens
@@ -162,11 +166,11 @@ export const register: Register = on => {
       await addClaudeDay($, at, tokens)
       await Promise.all([
         update($, claudeTokens, t => ({
+          ...t,
           input: t.input + input,
           output: t.output + output,
           cacheRead: t.cacheRead + cacheRead,
           cacheWrite: t.cacheWrite + cacheWrite,
-          turns: t.turns + 1,
         })),
         update($, turnHistory, history => {
           const samples = [...history, { at, tokens }].sort((a, b) => a.at - b.at)
@@ -175,6 +179,13 @@ export const register: Register = on => {
         }),
       ])
     }
+    return response
+  })
+
+  // A turn is the person's: a subagent's runs are counted in tokens, not turns.
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined) await update($, claudeTokens, t => ({ ...t, turns: t.turns + 1 }))
     return done
   })
 

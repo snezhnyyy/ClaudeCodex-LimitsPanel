@@ -1,6 +1,7 @@
 import type { EngineInterface, SessionRateLimit } from 'claude-code'
 
 import type { Window } from '../types'
+import { t } from './i18n'
 
 export const HOUR = 60 * 60 * 1000
 export const CLAUDE = '#d97757'
@@ -10,8 +11,8 @@ export const YELLOW = '#d29922'
 export const RED = '#f85149'
 
 export const WINDOWS = [
-  { kind: 'five_hour', label: '5 часов', short: '5ч', duration: 5 * HOUR },
-  { kind: 'seven_day', label: 'Неделя', short: 'Нед', duration: 7 * 24 * HOUR },
+  { kind: 'five_hour', text: () => t.fiveHour, duration: 5 * HOUR },
+  { kind: 'seven_day', text: () => t.week, duration: 7 * 24 * HOUR },
 ] as const
 
 type Kind = typeof WINDOWS[number]['kind']
@@ -67,6 +68,8 @@ export function pace(window: DisplayWindow, duration: number, now: number) {
   if (window.expired || window.resetsAt === undefined) return { color: GREEN }
   const elapsedMs = Math.max(0, Math.min(duration, now - (window.resetsAt - duration)))
   const expected = 100 * elapsedMs / duration
+  // The first minutes of a window say nothing about its pace: no forecast from them.
+  if (window.percent < 50 && elapsedMs < duration * 0.2) return { expected, color: GREEN }
   const hitsAt = window.percent >= 100 ? now
     : expected > 0 && window.percent > expected
       ? now + elapsedMs * (100 - window.percent) / window.percent
@@ -84,7 +87,8 @@ async function saveSnapshots($: EngineInterface, now: number, limits: SessionRat
   const messages: string[] = []
   let changed = false
 
-  for (const { kind, label } of WINDOWS) {
+  for (const { kind, text } of WINDOWS) {
+    const label = text().label
     const old = previous[kind]
     const reported = liveWindow(limits, kind)
     // A session can keep reporting its last response after that window ended.
@@ -97,7 +101,7 @@ async function saveSnapshots($: EngineInterface, now: number, limits: SessionRat
     const resetByTime = expired(old, now)
     const resetByDrop = old !== undefined && live !== undefined && old.percent - live.percent >= RESET_DROP
     const reset = resetByTime || resetByDrop
-    if (reset && !old?.resetNotified) messages.push(`Claude · ${label}: лимит сброшен`)
+    if (reset && !old?.resetNotified) messages.push(`Claude · ${label}: ${t.toastReset}`)
 
     if (!live) {
       if (old && resetByTime && !old.resetNotified) {
@@ -113,7 +117,7 @@ async function saveSnapshots($: EngineInterface, now: number, limits: SessionRat
     const crossed = ([80, 95] as const).filter(level =>
       level > notified && before < level && live.percent >= level,
     )
-    if (crossed.length) messages.push(`Claude · ${label}: ${crossed.join(' и ')}% лимита`)
+    if (crossed.length) messages.push(`Claude · ${label}: ${t.toastCrossed(crossed.join(t.and))}`)
     updated[kind] = { ...live, observedAt: now, notified: crossed.at(-1) ?? notified }
     changed = true
   }

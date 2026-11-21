@@ -206,7 +206,8 @@ test('session hooks poll Codex and render token share, cache and burn rate', asy
     return { value: e.path.replace(/\\/g, '/').endsWith(dateSuffix) ? [{ ...file, mtimeMs }] : [] }
   })
   on('fs.stat', () => ({ value: { ...file, mtimeMs } }))
-  on('fs.read', () => {
+  on('fs.read', (_, e) => {
+    if (e.path.endsWith('auth.json')) return { value: '{}' }
     reads++
     return {
       value: JSON.stringify({
@@ -220,6 +221,15 @@ test('session hooks poll Codex and render token share, cache and burn rate', asy
     }
   })
   on('turn.complete', (_, e) => ({ text: e.answer, usage: e.usage }))
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const,
+      usage: {
+        model: 'claude', input_tokens: 500, output_tokens: 1000,
+        cache_read_input_tokens: 4000, cache_creation_input_tokens: 500,
+      },
+    }
+  })
 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await $.session.attach({ surface: 'desktop', clientId: 'desktop:test' })
@@ -257,6 +267,7 @@ test('session hooks poll Codex and render token share, cache and burn rate', asy
   expect(cacheWrites).toBe(1)
   expect(await ui.find({ type: 'Text', text: /^2.0k ток · 1 задача$/ })).toBeDefined()
 
+  for await (const _ of $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude', messageCount: 1 })) void _
   await $.turn.complete({
     turnId: 'turn-1', reason: 'answer', answer: 'Готово', durationMs: 500, isAborted: false,
     usage: {
@@ -292,7 +303,7 @@ test('a narrow pane keeps percents and drops reset times and the model', async (
     },
   }))
   const wide = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await wide.find({ type: 'Text', text: /^13ч 0м$/ })).toBeDefined()
+  expect(await wide.find({ type: 'Text', text: /^13ч$/ })).toBeDefined()
   await wide.unmount()
   const narrow = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 26 } })
   for (const value of ['75%', '32%', '69%', '10%']) {
@@ -301,4 +312,109 @@ test('a narrow pane keeps percents and drops reset times and the model', async (
   expect(await narrow.find({ type: 'Text', text: /\d+м$/ })).toBeUndefined()
   expect(await narrow.find({ type: 'Text', text: /gpt-6.2-sol/ })).toBeUndefined()
   await narrow.unmount()
+})
+
+test('Codex limits come from the live usage endpoint, and rollouts stand in when it fails', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.store(on, {})
+  mock.env(on, { CODEX_HOME: '/codex-live' })
+  let up = true
+  let fetches = 0
+  let sentAuth: string | undefined
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  on('session.usage', () => ({ value: { startedAt: NOW - HOUR, context: { window: 200_000 }, rateLimits: [] } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }))
+  const day = new Date(NOW)
+  const dateSuffix = [day.getFullYear(), day.getMonth() + 1, day.getDate()]
+    .map(value => String(value).padStart(2, '0')).join('/')
+  const file = { name: 'rollout.jsonl', kind: 'file', size: 512, isLink: false, mtimeMs: NOW - HOUR } as const
+  on('fs.list', (_, e) => ({ value: e.path.replace(/\\/g, '/').endsWith(dateSuffix) ? [file] : [] }))
+  on('fs.stat', () => ({ value: file }))
+  on('fs.read', (_, e) => e.path.endsWith('auth.json')
+    ? { value: JSON.stringify({ tokens: { access_token: 'tok', account_id: 'acc' } }) }
+    : {
+      value: JSON.stringify({
+        payload: {
+          type: 'token_count', info: { total_token_usage: { total_tokens: 10 } },
+          rate_limits: { primary: { used_percent: 84, resets_at: (NOW + HOUR) / 1000 } },
+        },
+      }),
+    })
+  on('http.fetch', (_, e) => {
+    fetches++
+    sentAuth = e.init?.headers?.Authorization
+    if (!up) return { value: { status: 500, ok: false, headers: {}, text: '' } }
+    return {
+      value: {
+        status: 200, ok: true, headers: {},
+        text: JSON.stringify({
+          plan_type: 'plus',
+          rate_limit: {
+            primary_window: { used_percent: 12, reset_at: (NOW + 2 * HOUR) / 1000 },
+            secondary_window: { used_percent: 17, reset_at: (NOW + 48 * HOUR) / 1000 },
+          },
+        }),
+      },
+    }
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:test' })
+  await clock.advance(0)
+  expect(fetches).toBe(1)
+  expect(sentAuth).toBe('Bearer tok')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^12%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^17%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^84%$/ })).toBeUndefined()
+  await ui.unmount()
+
+  up = false
+  await clock.advance(60_000)
+  expect(fetches).toBe(2)
+  const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await after.find({ type: 'Text', text: /^84%$/ })).toBeDefined()
+  await after.unmount()
+})
+
+test('a fresh window with a few percent used shows no forecast or Codex tip', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on, {})
+  on('session.usage', () => ({
+    value: {
+      startedAt: NOW - HOUR, context: { window: 200_000, percent: 10 },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 4, resetsAt: new Date(NOW + 4.8 * HOUR).toISOString() }],
+    },
+  }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^4%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /кончится/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Отдай следующую задачу/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the language option switches the pane to English', { options: { language: 'en' } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on, {})
+  on('session.usage', () => ({
+    value: {
+      startedAt: NOW - HOUR, context: { window: 200_000, percent: 10 }, cost: { usd: 2 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 81, resetsAt: new Date(NOW + 3 * HOUR).toISOString() },
+        { kind: 'seven_day', percentUsed: 5, resetsAt: new Date(NOW + 6 * 24 * HOUR + 4 * HOUR).toISOString() },
+      ],
+    },
+  }))
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    for (const text of [/^5h$/, /^Wk$/, /^Context$/, /^3h$/, /^6d4h$/, /^Codex instead of Claude$/, /^Last hour$/, /^⚠ runs out ~[A-Z][a-z]{2} \d{2}:\d{2}$/]) {
+      expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    }
+    expect(await ui.find({ type: 'Text', text: /[А-Яа-яЁё]/ })).toBeUndefined()
+    await ui.unmount()
+  }
 })

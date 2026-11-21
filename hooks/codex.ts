@@ -21,9 +21,14 @@ type Rollout = { path: string; mtimeMs: number; day: string }
 type RateWindow = { used_percent?: unknown; resets_at?: unknown }
 type RateLimits = { primary?: RateWindow; secondary?: RateWindow; plan_type?: unknown }
 type TokenCount = { total?: number; limits?: RateLimits; model?: string }
-type Scan = { newest: Rollout | undefined; startedAt: number }
+type Scan = { newest: Rollout | undefined; startedAt: number; live?: RateLimits }
 
 let codexSessions: string | undefined
+let codexBase: string | undefined
+// The live numbers, as the Codex app shows them: asked at most about once a minute.
+const LIVE_URL = 'https://chatgpt.com/backend-api/wham/usage'
+const LIVE_MS = 55_000
+let live: { at: number; limits: RateLimits | undefined } | undefined
 let lastScan: Scan | undefined
 // Older rollouts rarely change: keep what their tail said, keyed by path and mtime.
 const tails = new Map<string, { mtimeMs: number; count: TokenCount }>()
@@ -34,7 +39,8 @@ async function sessionsDir($: EngineInterface): Promise<string | undefined> {
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   const base = codexHome ?? (home ? `${home}/.codex` : undefined)
   if (!base) return undefined
-  codexSessions = `${base.replace(/\\/g, '/')}/sessions`
+  codexBase = base.replace(/\\/g, '/')
+  codexSessions = `${codexBase}/sessions`
   return codexSessions
 }
 
@@ -91,6 +97,48 @@ async function lastTokenCount($: EngineInterface, path: string): Promise<TokenCo
   return found
 }
 
+type LiveWindow = { used_percent?: unknown; reset_at?: unknown; reset_after_seconds?: unknown }
+
+function fromLive(raw: LiveWindow | undefined, now: number): RateWindow | undefined {
+  if (!raw || typeof raw.used_percent !== 'number') return undefined
+  const resets_at = typeof raw.reset_at === 'number' ? raw.reset_at
+    : typeof raw.reset_after_seconds === 'number' ? now / 1000 + raw.reset_after_seconds : undefined
+  return { used_percent: raw.used_percent, resets_at }
+}
+
+/** The limits from the endpoint the Codex app reads; undefined when it can't be reached. */
+async function liveLimits($: EngineInterface, now: number): Promise<RateLimits | undefined> {
+  if (live && now >= live.at && now - live.at < LIVE_MS) return live.limits
+  let limits: RateLimits | undefined
+  try {
+    await sessionsDir($)
+    if (codexBase) {
+      const auth = JSON.parse(await $.fs.read(`${codexBase}/auth.json`)) as {
+        tokens?: { access_token?: unknown; account_id?: unknown }
+      }
+      const token = auth.tokens?.access_token
+      if (typeof token === 'string' && token) {
+        const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'User-Agent': 'codex_cli_rs' }
+        if (typeof auth.tokens?.account_id === 'string') headers['ChatGPT-Account-Id'] = auth.tokens.account_id
+        const res = await $.http.fetch(LIVE_URL, { headers })
+        if (res.ok) {
+          const body = JSON.parse(res.text) as {
+            plan_type?: unknown
+            rate_limit?: { primary_window?: LiveWindow; secondary_window?: LiveWindow }
+          }
+          const primary = fromLive(body.rate_limit?.primary_window, now)
+          const secondary = fromLive(body.rate_limit?.secondary_window, now)
+          if (primary || secondary) limits = { primary, secondary, plan_type: body.plan_type }
+        }
+      }
+    }
+  } catch {
+    // No login, no network or a new answer shape: the rollouts still say something.
+  }
+  live = { at: now, limits }
+  return limits
+}
+
 function toWindow(raw: RateWindow | undefined): Window | undefined {
   if (typeof raw?.used_percent !== 'number' || !Number.isFinite(raw.used_percent)) return undefined
   const resetsAt = typeof raw.resets_at === 'number' && Number.isFinite(raw.resets_at) ? raw.resets_at * 1000 : undefined
@@ -115,10 +163,12 @@ function sameDays(a: Record<string, number> | undefined, b: Record<string, numbe
 export async function refreshCodex($: EngineInterface, now: number, startedAt: number) {
   const files = await recentRollouts($, now)
   const newest = files[0]
-  if (lastScan?.startedAt === startedAt && lastScan.newest?.path === newest?.path &&
+  const fresh = await liveLimits($, now)
+  if (JSON.stringify(lastScan?.live) === JSON.stringify(fresh) &&
+    lastScan?.startedAt === startedAt && lastScan.newest?.path === newest?.path &&
     lastScan.newest?.mtimeMs === newest?.mtimeMs) return false
 
-  let limits: RateLimits | undefined
+  let limits: RateLimits | undefined = fresh
   let model: string | undefined
   let sessionTokens = 0
   let sessionThreads = 0
@@ -175,6 +225,6 @@ export async function refreshCodex($: EngineInterface, now: number, startedAt: n
     previous.sessionTokens !== info.sessionTokens || previous.sessionThreads !== info.sessionThreads ||
     !sameDays(previous.days, days))
   if (changed) await update($, codex, () => info)
-  if (complete) lastScan = { newest, startedAt }
+  if (complete) lastScan = { newest, startedAt, live: fresh }
   return changed
 }

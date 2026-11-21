@@ -4,6 +4,7 @@ import type { ClaudeTokens, CodexInfo, TurnSample } from '../types'
 import { CLAUDE, CODEX, GREEN, HOUR, RED, WINDOWS, YELLOW, pace, percent } from './claude-limits'
 import type { DisplayWindow } from './claude-limits'
 import { dayKey } from './codex'
+import { qty, t } from './i18n'
 
 type Desktop = ElementTable<'desktop'>
 export type PaneElements = Pick<Desktop, 'Box' | 'Text' | 'Button'> &
@@ -34,7 +35,6 @@ const BAR_HEIGHT = 8
 const CHART_HEIGHT = 44
 const NARROW = 34
 const DAY = 24 * HOUR
-const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const SPARKS = '▁▂▃▄▅▆▇█'
 const pad = (value: number) => String(value).padStart(2, '0')
 const fmtNum = (value: number) =>
@@ -43,22 +43,19 @@ const fmtPercent = (value: number) => `${value.toFixed(0)}%`
 
 function fmtForecast(ms: number) {
   const date = new Date(ms)
-  return `${WEEKDAYS[date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return `${t.weekdays[date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function fmtReset(window: DisplayWindow, now: number) {
-  if (window.expired) return 'сброшен'
+  if (window.expired) return t.reset
   if (window.resetsAt === undefined) return undefined
-  const minutes = Math.ceil((window.resetsAt - now) / 60_000)
+  const minutes = Math.max(0, Math.ceil((window.resetsAt - now) / 60_000))
   const days = Math.floor(minutes / 1440)
   const hours = Math.floor(minutes / 60) % 24
-  return [days ? `${days}д` : '', hours ? `${hours}ч` : '', `${minutes % 60}м`].filter(Boolean).join(' ')
-}
-
-function qty(value: number, one: string, few: string, many: string) {
-  const digit = value % 10
-  const teens = value % 100 >= 11 && value % 100 <= 14
-  return `${value} ${!teens && digit === 1 ? one : !teens && digit >= 2 && digit <= 4 ? few : many}`
+  // Two units at most, so it always fits beside the bar: 6д4ч, 3ч12м, 12м.
+  if (days) return `${days}${t.day}${hours ? `${hours}${t.hour}` : ''}`
+  if (hours) return `${hours}${t.hour}${minutes % 60 ? `${minutes % 60}${t.minute}` : ''}`
+  return `${minutes}${t.minute}`
 }
 
 function card({ Box, terminal }: PaneElements, children: RenderChildren) {
@@ -114,26 +111,26 @@ function fixed({ Box }: PaneElements, child: RenderChildren) {
   return <Box flexShrink={0}>{child}</Box>
 }
 
-function limitRow(ui: PaneElements, item: typeof WINDOWS[number], window: DisplayWindow | undefined, now: number, narrow: boolean) {
+function limitRow(
+  ui: PaneElements, item: typeof WINDOWS[number], window: DisplayWindow | undefined, now: number, narrow: boolean,
+) {
   const { Box, Text } = ui
+  const shown = window && fmtPercent(window.percent)
+  const short = item.text().short
   const forecast = window && pace(window, item.duration, now)
   const reset = window && !narrow ? fmtReset(window, now) : undefined
   const row = (
     <Box flexDirection="row" alignItems="center" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
-      <Box width={3} flexShrink={0}><Text size="caption">{item.short}</Text></Box>
+      <Box width={3} flexShrink={0}><Text size="caption">{short}</Text></Box>
       {window && forecast ? [
-        track(ui, window.percent, forecast.color, { marker: forecast.expected, alt: `${item.short} ${fmtPercent(window.percent)}` }),
-        fixed(ui, <Text size="caption" weight="bold" tabular color={forecast.color}>{fmtPercent(window.percent)}</Text>),
-        reset && (
-          <Box flexShrink={1} minWidth={0}>
-            <Text size="caption" dimColor tabular wrap="truncate">{reset}</Text>
-          </Box>
-        ),
-      ] : <Text size="caption" dimColor>нет данных</Text>}
+        track(ui, window.percent, forecast.color, { marker: forecast.expected, alt: `${short} ${shown}` }),
+        fixed(ui, <Text size="caption" weight="bold" tabular color={forecast.color}>{shown}</Text>),
+        reset && fixed(ui, <Text size="caption" dimColor tabular>{reset}</Text>),
+      ] : <Text size="caption" dimColor>{t.noData}</Text>}
     </Box>
   )
   return forecast?.hitsAt === undefined ? [row] : [
-    row, <Text size="caption" color={forecast.color}>⚠ кончится ~{fmtForecast(forecast.hitsAt)}</Text>,
+    row, <Text size="caption" color={forecast.color}>{t.runsOut}{fmtForecast(forecast.hitsAt)}</Text>,
   ]
 }
 
@@ -142,8 +139,8 @@ function contextRow(ui: PaneElements, fill: number) {
   const color = fill > 85 ? RED : fill > 70 ? YELLOW : GREEN
   return (
     <Box flexDirection="row" alignItems="center" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
-      {fixed(ui, <Text size="caption">Контекст</Text>)}
-      {track(ui, fill, color, { alt: `Контекст ${fmtPercent(fill)}` })}
+      {fixed(ui, <Text size="caption">{t.context}</Text>)}
+      {track(ui, fill, color, { alt: `${t.context} ${fmtPercent(fill)}` })}
       {fixed(ui, <Text size="caption" weight="bold" tabular color={color}>{fmtPercent(fill)}</Text>)}
     </Box>
   )
@@ -193,7 +190,7 @@ function lastWeek(data: PaneData): Day[] {
     const key = dayKey(at)
     return {
       key,
-      label: WEEKDAYS[new Date(at).getDay()] ?? '',
+      label: t.weekdays[new Date(at).getDay()] ?? '',
       claude: data.claudeDays?.[key] ?? 0,
       codex: data.codexInfo.days?.[key] ?? 0,
       today: index === 6,
@@ -250,13 +247,13 @@ function weekCard(ui: PaneElements, data: PaneData, days: Day[]) {
     )
   return card(ui, [
     <Box flexDirection="row" justifyContent="space-between" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
-      {fixed(ui, <Text weight="semibold">7 дней</Text>)}
+      {fixed(ui, <Text weight="semibold">{t.sevenDays}</Text>)}
       <Box flexShrink={1} minWidth={0}>
-        <Text size="caption" dimColor tabular wrap="truncate">{`${fmtNum(claude + codex)} ток`}</Text>
+        <Text size="caption" dimColor tabular wrap="truncate">{`${fmtNum(claude + codex)} ${t.tok}`}</Text>
       </Box>
     </Box>,
     columns(ui, days.map(day => ({ claude: day.claude, codex: day.codex, strong: day.today ? true : false })),
-      `Токены по дням: ${days.map(day => `${day.label} ${fmtNum(day.claude)}+${fmtNum(day.codex)}`).join(', ')}`),
+      `${t.byDay}: ${days.map(day => `${day.label} ${fmtNum(day.claude)}+${fmtNum(day.codex)}`).join(', ')}`),
     labels,
     <Text size="caption" dimColor tabular wrap="truncate">
       <Text color={CLAUDE}>●</Text>{` Claude ${fmtNum(claude)}  `}<Text color={CODEX}>●</Text>{` Codex ${fmtNum(codex)}`}
@@ -276,20 +273,20 @@ function shareCard(ui: PaneElements, data: PaneData, days: Day[], totalClaude: n
   return card(ui, [
     <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
       <Box flexShrink={1} minWidth={0}>
-        <Text weight="semibold" wrap="truncate">Codex вместо Claude</Text>
+        <Text weight="semibold" wrap="truncate">{t.codexInstead}</Text>
       </Box>
       {fixed(ui, <Text size="caption" weight="bold" tabular color={CODEX}>{fmtPercent(week)}</Text>)}
     </Box>,
     <Box flexDirection="row" alignItems="center" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
-      {track(ui, week, CODEX, { rest: CLAUDE, alt: `Доля Codex за 7 дней ${fmtPercent(week)}` })}
+      {track(ui, week, CODEX, { rest: CLAUDE, alt: `${t.codexShareAlt} ${fmtPercent(week)}` })}
     </Box>,
     <Text size="caption" dimColor tabular>
       {codexInfo.sessionTokens > 0
-        ? `сессия: ${fmtPercent(session)} · ${fmtNum(codexInfo.sessionTokens)} ток Codex`
-        : 'сессия: Codex ещё не запускался'}
+        ? t.sessionShare(fmtPercent(session), fmtNum(codexInfo.sessionTokens))
+        : t.sessionNoCodex}
     </Text>,
     saved !== undefined && (
-      <Text size="caption" dimColor tabular>{`≈ $${saved.toFixed(2)} за неделю по цене Claude`}</Text>
+      <Text size="caption" dimColor tabular>{t.savedWeek(saved.toFixed(2))}</Text>
     ),
   ])
 }
@@ -305,17 +302,17 @@ function hourCard(ui: PaneElements, data: PaneData, burn: number) {
   }
   return card(ui, [
     <Box flexDirection="row" justifyContent="space-between" gap={ui.terminal ? 1 : 'xs'} minWidth={0}>
-      {fixed(ui, <Text weight="semibold">Последний час</Text>)}
+      {fixed(ui, <Text weight="semibold">{t.lastHour}</Text>)}
       <Box flexShrink={1} minWidth={0}>
-        <Text size="caption" dimColor tabular wrap="truncate">{`~${fmtNum(Math.round(burn / 60))} ток/мин`}</Text>
+        <Text size="caption" dimColor tabular wrap="truncate">{`~${fmtNum(Math.round(burn / 60))} ${t.tokPerMin}`}</Text>
       </Box>
     </Box>,
     columns(ui, buckets.map(claude => ({ claude, codex: 0 })),
-      `Токены Claude по 5 минут за последний час: ${buckets.map(fmtNum).join(', ')}`, 28),
+      `${t.lastHourAlt}: ${buckets.map(fmtNum).join(', ')}`, 28),
     !ui.terminal && (
       <Box flexDirection="row" justifyContent="space-between" minWidth={0}>
-        <Text size="caption" dimColor>−60 мин</Text>
-        <Text size="caption" dimColor>сейчас</Text>
+        <Text size="caption" dimColor>{t.minus60}</Text>
+        <Text size="caption" dimColor>{t.now}</Text>
       </Box>
     ),
   ])
@@ -328,7 +325,7 @@ export function drawPane(ui: PaneElements, data: PaneData) {
   const totalClaude = input + tokens.output
   const burn = history.reduce((sum, turn) => turn.at > now - HOUR ? sum + turn.tokens : sum, 0)
   const cost = costUsd === undefined ? undefined : data.preferences['cost-shawarma']
-    ? `≈ ${(costUsd / 4).toFixed(2)} шаурмы` : `$${costUsd.toFixed(2)}`
+    ? t.shawarma((costUsd / 4).toFixed(2)) : `$${costUsd.toFixed(2)}`
   const tally = cost === undefined ? <Text size="caption" dimColor tabular>{fmtNum(totalClaude)}</Text> : (
     <Button key="cost-shawarma" plain dimColor onPress={() => data.toggle('cost-shawarma')}>
       {`${fmtNum(totalClaude)} · ${cost}`}
@@ -341,15 +338,15 @@ export function drawPane(ui: PaneElements, data: PaneData) {
   const claudeDetails = [
     contextPercent !== undefined && contextRow(ui, contextPercent),
     <Text size="caption" dimColor tabular>
-      {input > 0 ? `кэш ${fmtPercent(100 * tokens.cacheRead / input)} · ` : ''}
-      {`~${fmtNum(Math.round(burn / 60))} ток/мин · ${qty(tokens.turns, 'ход', 'хода', 'ходов')}`}
+      {input > 0 ? `${t.cache} ${fmtPercent(100 * tokens.cacheRead / input)} · ` : ''}
+      {`~${fmtNum(Math.round(burn / 60))} ${t.tokPerMin} · ${qty(tokens.turns, t.turns)}`}
     </Text>,
-    recommendCodex && <Text size="caption" weight="semibold">💡 Отдай следующую задачу Codex</Text>,
+    recommendCodex && <Text size="caption" weight="semibold">{t.codexHint}</Text>,
   ]
   const codexMeta = [codexInfo.model, codexInfo.plan].filter(Boolean).join(' · ')
   const codexDetails = (
     <Text size="caption" dimColor tabular>
-      {`${fmtNum(codexInfo.sessionTokens)} ток · ${qty(codexInfo.sessionThreads, 'задача', 'задачи', 'задач')}`}
+      {`${fmtNum(codexInfo.sessionTokens)} ${t.tok} · ${qty(codexInfo.sessionThreads, t.tasks)}`}
     </Text>
   )
   const days = lastWeek(data)

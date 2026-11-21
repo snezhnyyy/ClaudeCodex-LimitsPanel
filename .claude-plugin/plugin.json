@@ -1,1 +1,16 @@
-{ "name": "limits", "version": "0.2.0", "description": "Claude and Codex usage limits and this session's tokens in a pane", "types": "./types/index.d.ts" }
+{
+  "name": "limits",
+  "version": "0.3.0",
+  "description": "Claude and Codex usage limits, pace and this session's tokens in a side pane (Russian or English)",
+  "author": { "name": "snezhnyyy" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language / Язык",
+      "description": "Pane language: ru (Русский) or en (English)",
+      "default": "ru",
+      "options": ["ru", "en"]
+    }
+  }
+}

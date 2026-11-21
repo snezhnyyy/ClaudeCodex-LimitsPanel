@@ -1,5 +1,13 @@
 {
   "name": "claudecodex-limitspanel",
-  "owner": { "name": "snezhnyyy" },
-  "plugins": [{ "name": "limits", "source": "./" }]
+  "owner": {
+    "name": "snezhnyyy"
+  },
+  "plugins": [
+    {
+      "name": "limits",
+      "source": "./"
+    }
+  ],
+  "description": "Claude and Codex usage limits pane for Claude Code (English / Русский)"
 }
